@@ -640,6 +640,21 @@ fn evaluate_command_at_depth(command: &str, depth: usize) -> Option<(&'static st
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("cmd-guard {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    if args.iter().any(|a| a == "--setup") {
+        if let Err(e) = setup() {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let mut input = String::new();
     if io::stdin().read_to_string(&mut input).is_err() {
         // Can't read input — pass through silently
@@ -656,6 +671,106 @@ fn main() {
     }
 
     // No verdict — pass through (no output, exit 0)
+}
+
+/// Create the symlink and configure settings.json for the Claude Code hook.
+fn setup() -> Result<(), String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
+    let hooks_dir = format!("{home}/.claude/hooks");
+    let symlink_path = format!("{hooks_dir}/cmd-guard");
+    let settings_path = format!("{home}/.claude/settings.json");
+
+    // Resolve current binary path
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|e| format!("cannot determine executable path: {e}"))?;
+
+    // Create hooks directory and symlink
+    std::fs::create_dir_all(&hooks_dir).map_err(|e| format!("cannot create {hooks_dir}: {e}"))?;
+
+    let link = std::path::Path::new(&symlink_path);
+    if link.read_link().ok().as_deref() == Some(exe.as_path()) {
+        eprintln!(
+            "Symlink already correct: {symlink_path} -> {}",
+            exe.display()
+        );
+    } else {
+        // Remove existing symlink/file if present
+        if link.symlink_metadata().is_ok() {
+            std::fs::remove_file(link)
+                .map_err(|e| format!("cannot remove existing {symlink_path}: {e}"))?;
+        }
+        #[cfg(not(unix))]
+        compile_error!("cmd-guard requires Unix (symlink support)");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&exe, link)
+            .map_err(|e| format!("cannot create symlink {symlink_path}: {e}"))?;
+        eprintln!("Symlinked {symlink_path} -> {}", exe.display());
+    }
+
+    // Configure settings.json
+    let settings_file = std::path::Path::new(&settings_path);
+    let mut settings: serde_json::Value = if settings_file.exists() {
+        let content = std::fs::read_to_string(settings_file)
+            .map_err(|e| format!("cannot read {settings_path}: {e}"))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("{settings_path} is not valid JSON: {e}"))?
+    } else {
+        std::fs::create_dir_all(format!("{home}/.claude"))
+            .map_err(|e| format!("cannot create ~/.claude: {e}"))?;
+        serde_json::json!({})
+    };
+
+    // Check if already configured
+    let already_configured = settings
+        .pointer("/hooks/PreToolUse")
+        .and_then(|v| v.as_array())
+        .is_some_and(|arr| {
+            arr.iter().any(|entry| {
+                entry
+                    .pointer("/hooks/0/command")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s.contains("cmd-guard"))
+            })
+        });
+
+    if already_configured {
+        eprintln!("Hook already configured in {settings_path}");
+        return Ok(());
+    }
+
+    // Add hook entry
+    let hook_entry = serde_json::json!({
+        "matcher": "Bash",
+        "hooks": [{
+            "type": "command",
+            "command": symlink_path
+        }]
+    });
+
+    settings
+        .as_object_mut()
+        .ok_or("settings.json root is not an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or("settings.json \"hooks\" is not an object")?
+        .entry("PreToolUse")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or("settings.json \"hooks.PreToolUse\" is not an array")?
+        .push(hook_entry);
+
+    let content = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("cannot serialize settings: {e}"))?;
+    let tmp_file = settings_file.with_extension("json.tmp");
+    std::fs::write(&tmp_file, content + "\n")
+        .map_err(|e| format!("cannot write {}: {e}", tmp_file.display()))?;
+    std::fs::rename(&tmp_file, settings_file)
+        .map_err(|e| format!("cannot rename temp file to {settings_path}: {e}"))?;
+    eprintln!("Updated {settings_path} with cmd-guard hook");
+    Ok(())
 }
 
 #[cfg(test)]

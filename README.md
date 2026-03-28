@@ -1,5 +1,10 @@
 # cmd-guard
 
+[![CI](https://github.com/redodson01/cmd-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/redodson01/cmd-guard/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/release/redodson01/cmd-guard)](https://github.com/redodson01/cmd-guard/releases/latest)
+[![Release Date](https://img.shields.io/github/release-date/redodson01/cmd-guard)](https://github.com/redodson01/cmd-guard/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A fast, compiled [PreToolUse hook](https://code.claude.com/docs/en/hooks) for
 [Claude Code](https://claude.ai/code) that intercepts dangerous shell commands
 before they execute. Written in Rust for near-zero cold start time.
@@ -83,18 +88,36 @@ comprehensive shell parser. Known gaps:
 
 ## Install
 
-Requires [Rust](https://rustup.rs/) 1.85+ (edition 2024) and Python 3 (for JSON
-settings configuration).
+### Homebrew
+
+```bash
+brew install redodson01/tap/cmd-guard
+cmd-guard --setup
+```
+
+### From source
+
+Requires [Rust](https://rustup.rs/) 1.85+ (edition 2024).
+
+```bash
+cargo install --git https://github.com/redodson01/cmd-guard
+cmd-guard --setup
+```
+
+Or clone and use make:
 
 ```bash
 make install
 ```
 
-This will:
+### What `--setup` does
 
-1. Build and install the binary via `cargo install`
-2. Symlink it to `~/.claude/hooks/cmd-guard`
-3. Add the PreToolUse hook entry to `~/.claude/settings.json`
+`cmd-guard --setup` is idempotent and handles all post-install configuration:
+
+1. Symlinks the binary to `~/.claude/hooks/cmd-guard`
+2. Adds the PreToolUse hook entry to `~/.claude/settings.json`
+
+Re-run it after upgrading to update the symlink.
 
 ### Uninstall
 
@@ -110,6 +133,10 @@ place — remove it manually if desired.
 ```bash
 # Run tests
 cargo test
+
+# Lint and format (enforced by CI)
+cargo clippy -- -D warnings
+cargo fmt --check
 
 # Build release binary
 cargo build --release
