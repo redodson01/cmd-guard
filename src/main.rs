@@ -86,14 +86,20 @@ fn split_segments(cmd: &str) -> Vec<String> {
 
         // Check for &&, ||
         if i + 1 < len && ((c == '&' && chars[i + 1] == '&') || (c == '|' && chars[i + 1] == '|')) {
-            segments.push(current.trim().to_string());
+            let seg = current.trim().to_string();
+            if !seg.is_empty() {
+                segments.push(seg);
+            }
             current = String::new();
             i += 2;
             continue;
         }
         // Check for ;, |, and & (background operator)
         if c == ';' || c == '|' || c == '&' {
-            segments.push(current.trim().to_string());
+            let seg = current.trim().to_string();
+            if !seg.is_empty() {
+                segments.push(seg);
+            }
             current = String::new();
             i += 1;
             continue;
@@ -666,6 +672,22 @@ mod tests {
 
         let segs = split_segments("echo foo | grep bar");
         assert_eq!(segs, vec!["echo foo", "grep bar"]);
+    }
+
+    #[test]
+    fn test_split_segments_empty() {
+        // Consecutive operators should not produce empty segments
+        let segs = split_segments("git status ;; git diff");
+        assert_eq!(segs, vec!["git status", "git diff"]);
+
+        let segs = split_segments("; git status");
+        assert_eq!(segs, vec!["git status"]);
+
+        let segs = split_segments("git status ;");
+        assert_eq!(segs, vec!["git status"]);
+
+        let segs = split_segments("&&");
+        assert!(segs.is_empty());
     }
 
     #[test]
@@ -1244,6 +1266,26 @@ mod tests {
         // Table/column names containing SQL keywords should not false-positive
         assert!(process_segment_at_depth("psql -c 'SELECT truncated_at FROM posts'", 0).is_none());
         assert!(process_segment_at_depth("psql -c 'SELECT * FROM drop_schema_logs'", 0).is_none());
+    }
+
+    #[test]
+    fn test_psql_quoted_drop_table() {
+        // DROP TABLE inside a quoted -c argument should still be caught
+        assert!(matches!(
+            process_segment_at_depth(r#"psql -c "DROP TABLE users""#, 0),
+            Some(("ask", _))
+        ));
+        assert!(matches!(
+            process_segment_at_depth("psql -c 'DROP TABLE users'", 0),
+            Some(("ask", _))
+        ));
+    }
+
+    #[test]
+    fn test_git_stash_drop_passthrough() {
+        // git stash drop (single entry) is not guarded — only clear is
+        assert!(process_segment_at_depth("git stash drop", 0).is_none());
+        assert!(process_segment_at_depth("git stash drop stash@{0}", 0).is_none());
     }
 
     #[test]
