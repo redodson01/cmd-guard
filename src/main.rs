@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 
 /// Maximum nesting depth for shell wrapper unwrapping to prevent stack
 /// overflow from pathological input like `bash -c "bash -c '...'"`.
@@ -653,6 +653,13 @@ fn main() {
             std::process::exit(1);
         }
         return;
+    }
+
+    if io::stdin().is_terminal() {
+        eprintln!("Usage: cmd-guard [--setup | --version]");
+        eprintln!("This tool is designed to be used as a Claude Code PreToolUse hook.");
+        eprintln!("Run 'cmd-guard --setup' to install.");
+        std::process::exit(1);
     }
 
     let mut input = String::new();
